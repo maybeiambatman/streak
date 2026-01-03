@@ -5,9 +5,8 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../theme/colors';
-import { typography } from '../theme/typography';
 
 // Import screens
 import HomeScreen from '../screens/HomeScreen';
@@ -18,7 +17,7 @@ import ProgressScreen from '../screens/ProgressScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 
 // Tab icons (simple text-based for now)
-const TabIcon = ({ name, focused, color }) => {
+const TabIcon = ({ name, focused }) => {
   const icons = {
     Home: '🏠',
     Workout: '💪',
@@ -39,7 +38,7 @@ const TabIcon = ({ name, focused, color }) => {
 
 // Create navigators
 const Tab = createBottomTabNavigator();
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
 
 // Home stack (includes workout flow)
 const HomeStack = () => {
@@ -54,7 +53,7 @@ const HomeStack = () => {
         name="Workout"
         component={WorkoutScreen}
         options={{
-          gestureEnabled: false, // Prevent accidental swipe during workout
+          gestureEnabled: false,
         }}
       />
       <Stack.Screen name="MuscleDetail" component={MuscleStatusScreen} />
@@ -106,8 +105,8 @@ const TabNavigator = () => {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color }) => (
-          <TabIcon name={route.name} focused={focused} color={color} />
+        tabBarIcon: ({ focused }) => (
+          <TabIcon name={route.name} focused={focused} />
         ),
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.gray500,
@@ -159,7 +158,8 @@ const styles = StyleSheet.create({
     height: 70,
   },
   tabBarLabel: {
-    ...typography.styles.caption,
+    fontSize: 12,
+    fontWeight: '400',
     marginBottom: 4,
   },
   tabIconContainer: {
