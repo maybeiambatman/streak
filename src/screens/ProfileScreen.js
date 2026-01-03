@@ -250,10 +250,10 @@ const ProfileScreen = ({ navigation }) => {
               <Text style={styles.settingDescription}>Workout reminders and streak alerts</Text>
             </View>
             <Switch
-              value={settings.notificationsEnabled}
+              value={settings.notificationsEnabled === true}
               onValueChange={(value) => handleToggleSetting('notificationsEnabled', value)}
               trackColor={{ false: colors.gray300, true: colors.primary + '60' }}
-              thumbColor={settings.notificationsEnabled ? colors.primary : colors.gray400}
+              thumbColor={settings.notificationsEnabled === true ? colors.primary : colors.gray400}
             />
           </View>
 
@@ -263,10 +263,10 @@ const ProfileScreen = ({ navigation }) => {
               <Text style={styles.settingDescription}>Play sounds for timers and completions</Text>
             </View>
             <Switch
-              value={settings.soundEnabled}
+              value={settings.soundEnabled === true}
               onValueChange={(value) => handleToggleSetting('soundEnabled', value)}
               trackColor={{ false: colors.gray300, true: colors.primary + '60' }}
-              thumbColor={settings.soundEnabled ? colors.primary : colors.gray400}
+              thumbColor={settings.soundEnabled === true ? colors.primary : colors.gray400}
             />
           </View>
 
