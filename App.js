@@ -1,44 +1,29 @@
 // FitStreak - Gamified Fitness App
 // Consistency beats intensity.
-// TEMPORARY: Minimal test to isolate TypeError
+
+// IMPORTANT: This import must be at the very top
+import 'react-native-gesture-handler';
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import AppNavigator from './src/navigation/AppNavigator';
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <SafeAreaView style={styles.container}>
+    <GestureHandlerRootView style={styles.container}>
+      <SafeAreaProvider>
         <StatusBar style="dark" />
-        <View style={styles.content}>
-          <Text style={styles.title}>FitStreak</Text>
-          <Text style={styles.subtitle}>Testing minimal setup...</Text>
-        </View>
-      </SafeAreaView>
-    </SafeAreaProvider>
+        <AppNavigator />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FF6B35',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 8,
   },
 });
