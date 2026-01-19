@@ -1,9 +1,11 @@
 // GainStreak - Workout Tracking App
 // Emphasizes consistency over intensity with streak mechanics
 
+import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -116,20 +118,24 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <SafeAreaProvider>
-        <StatusBar style="dark" />
-        <LoadingScreen />
-      </SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <StatusBar style="dark" />
+          <LoadingScreen />
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="dark" />
-      <NavigationContainer>
-        <MainNavigator />
-      </NavigationContainer>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <NavigationContainer>
+          <MainNavigator />
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
