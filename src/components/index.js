@@ -1,9 +1,8 @@
-// FitStreak Components Index
-export { default as MuscleBar, MuscleBarCompact, MuscleBarMini } from './MuscleBar';
-export { default as StreakCounter, StreakBadge, StreakDisplay } from './StreakCounter';
-export { default as ExerciseCard, ExerciseCardCompact } from './ExerciseCard';
-export { default as XPCounter, XPBadge, LevelDisplay, XPGained, LevelUpBanner, XPRing } from './XPCounter';
-export { default as RestTimer, MiniTimer } from './RestTimer';
-export { default as Button, IconButton, FAB, LinkButton, ChipButton } from './Button';
-export { default as Card, CardWithHeader, StatCard, ActionCard, InfoCard } from './Card';
-export { WorkoutPreview, WorkoutComplete, WorkoutHistoryItem } from './WorkoutSummary';
+// GainStreak Components Index
+
+export { default as StreakDisplay, StreakBadge } from './StreakDisplay';
+export { default as MuscleHeatMap, MuscleRecoveryList, RecoveryBar } from './MuscleHeatMap';
+export { default as SetLogger, CompletedSetRow, QuickWeightButtons } from './SetLogger';
+export { default as WorkoutCard, RestDayCard, WorkoutSummaryCard, WorkoutPreview } from './WorkoutCard';
+export { default as CelebrationModal, MilestoneModal } from './CelebrationModal';
+export { default as ExerciseList, ExerciseCard, ExerciseSelectItem } from './ExerciseList';

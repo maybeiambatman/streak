@@ -1,275 +1,182 @@
-// HistoryScreen
-// Workout history with calendar view
+// GainStreak History Screen
+// Displays workout history and statistics
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
-import { colors } from '../theme/colors';
-import { typography } from '../theme/typography';
-import { spacing, borderRadius, shadows } from '../theme/spacing';
 
-// Components
-import { WorkoutHistoryItem } from '../components/WorkoutSummary';
-
-// Storage & Utils
-import storage from '../storage/asyncStorage';
-import { formatDate, getFriendlyDate, getMonthName, getDatesInRange } from '../utils/dateHelpers';
-import { formatWorkoutType, formatDuration } from '../utils/formatters';
+import { useAppStore } from '../hooks/useStore';
+import { colors } from '../utils/colors';
+import { formatDuration, getLevelProgress } from '../utils/calculations';
+import { WorkoutSummaryCard } from '../components/WorkoutCard';
 
 const HistoryScreen = ({ navigation }) => {
-  const [workouts, setWorkouts] = useState([]);
-  const [selectedMonth, setSelectedMonth] = useState(new Date());
-  const [viewMode, setViewMode] = useState('calendar'); // 'calendar' or 'list'
-  const [loading, setLoading] = useState(true);
+  const { workouts, userProfile, streakData } = useAppStore();
 
-  useFocusEffect(
-    useCallback(() => {
-      loadWorkouts();
-    }, [])
-  );
+  // Calculate statistics
+  const stats = useMemo(() => {
+    const now = new Date();
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const monthAgo = new Date(now);
+    monthAgo.setDate(monthAgo.getDate() - 30);
 
-  const loadWorkouts = async () => {
-    try {
-      const allWorkouts = await storage.getWorkouts();
-      setWorkouts(allWorkouts.sort((a, b) => new Date(b.date) - new Date(a.date)));
-    } catch (error) {
-      console.error('Error loading workouts:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Get workouts for selected month
-  const getMonthWorkouts = () => {
-    const year = selectedMonth.getFullYear();
-    const month = selectedMonth.getMonth();
-
-    return workouts.filter(w => {
-      const workoutDate = new Date(w.date);
-      return workoutDate.getFullYear() === year && workoutDate.getMonth() === month;
+    const thisWeekWorkouts = workouts.filter(w => {
+      const date = new Date(w.date || w.completedAt);
+      return date >= weekAgo;
     });
-  };
 
-  // Get workout dates for calendar highlighting
-  const getWorkoutDates = () => {
-    return new Set(workouts.map(w => formatDate(w.date, 'yyyy-MM-dd')));
-  };
+    const thisMonthWorkouts = workouts.filter(w => {
+      const date = new Date(w.date || w.completedAt);
+      return date >= monthAgo;
+    });
 
-  // Generate calendar days
-  const generateCalendarDays = () => {
-    const year = selectedMonth.getFullYear();
-    const month = selectedMonth.getMonth();
+    const totalVolume = workouts.reduce((sum, w) => sum + (w.totalVolume || 0), 0);
+    const totalDuration = workouts.reduce((sum, w) => sum + (w.duration || 0), 0);
 
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const startPadding = firstDay.getDay(); // Days to pad at start
+    return {
+      totalWorkouts: workouts.length,
+      thisWeek: thisWeekWorkouts.length,
+      thisMonth: thisMonthWorkouts.length,
+      totalVolume: Math.round(totalVolume / 1000), // In tons
+      totalDuration: totalDuration,
+      avgDuration: workouts.length > 0 ? Math.round(totalDuration / workouts.length) : 0,
+    };
+  }, [workouts]);
 
-    const days = [];
+  // Group workouts by month
+  const groupedWorkouts = useMemo(() => {
+    const groups = {};
 
-    // Add empty padding for days before month starts
-    for (let i = 0; i < startPadding; i++) {
-      days.push({ empty: true, key: `empty-start-${i}` });
-    }
+    workouts
+      .sort((a, b) => new Date(b.date || b.completedAt) - new Date(a.date || a.completedAt))
+      .forEach(workout => {
+        const date = new Date(workout.date || workout.completedAt);
+        const monthKey = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-    // Add actual days
-    for (let d = 1; d <= lastDay.getDate(); d++) {
-      const date = new Date(year, month, d);
-      days.push({
-        date,
-        day: d,
-        key: formatDate(date, 'yyyy-MM-dd'),
-        hasWorkout: getWorkoutDates().has(formatDate(date, 'yyyy-MM-dd')),
+        if (!groups[monthKey]) {
+          groups[monthKey] = [];
+        }
+        groups[monthKey].push(workout);
       });
-    }
 
-    return days;
-  };
+    return groups;
+  }, [workouts]);
 
-  // Navigate months
-  const goToPreviousMonth = () => {
-    setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1));
-  };
-
-  const goToNextMonth = () => {
-    const next = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1);
-    if (next <= new Date()) {
-      setSelectedMonth(next);
-    }
-  };
-
-  const monthWorkouts = getMonthWorkouts();
-  const calendarDays = generateCalendarDays();
-  const workoutDates = getWorkoutDates();
-
-  // Stats for the month
-  const monthStats = {
-    workouts: monthWorkouts.length,
-    totalDuration: monthWorkouts.reduce((sum, w) => sum + (w.duration || 0), 0),
-    totalXP: monthWorkouts.reduce((sum, w) => sum + (w.xpEarned || 0), 0),
-  };
-
-  const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Text style={styles.loadingText}>Loading...</Text>
-      </SafeAreaView>
-    );
-  }
+  const levelProgress = getLevelProgress(userProfile?.totalXP || 0);
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>History</Text>
-        <View style={styles.viewToggle}>
-          <TouchableOpacity
-            style={[styles.toggleButton, viewMode === 'calendar' && styles.toggleButtonActive]}
-            onPress={() => setViewMode('calendar')}
-          >
-            <Text style={[styles.toggleText, viewMode === 'calendar' && styles.toggleTextActive]}>
-              Calendar
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.toggleButton, viewMode === 'list' && styles.toggleButtonActive]}
-            onPress={() => setViewMode('list')}
-          >
-            <Text style={[styles.toggleText, viewMode === 'list' && styles.toggleTextActive]}>
-              List
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
+    <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {viewMode === 'calendar' ? (
-          <>
-            {/* Month Navigation */}
-            <View style={styles.monthNav}>
-              <TouchableOpacity onPress={goToPreviousMonth} style={styles.monthNavButton}>
-                <Text style={styles.monthNavText}>←</Text>
-              </TouchableOpacity>
-              <Text style={styles.monthTitle}>
-                {getMonthName(selectedMonth)} {selectedMonth.getFullYear()}
-              </Text>
-              <TouchableOpacity
-                onPress={goToNextMonth}
-                style={[
-                  styles.monthNavButton,
-                  selectedMonth.getMonth() === new Date().getMonth() &&
-                    selectedMonth.getFullYear() === new Date().getFullYear() &&
-                    styles.monthNavButtonDisabled,
-                ]}
-              >
-                <Text style={styles.monthNavText}>→</Text>
-              </TouchableOpacity>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>History</Text>
+        </View>
+
+        {/* Stats Overview */}
+        <View style={styles.statsCard}>
+          <Text style={styles.statsTitle}>Your Progress</Text>
+
+          <View style={styles.statsGrid}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{stats.totalWorkouts}</Text>
+              <Text style={styles.statLabel}>Total Workouts</Text>
             </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{stats.thisWeek}</Text>
+              <Text style={styles.statLabel}>This Week</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{streakData?.currentStreak || 0}</Text>
+              <Text style={styles.statLabel}>Current Streak</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{streakData?.longestStreak || 0}</Text>
+              <Text style={styles.statLabel}>Best Streak</Text>
+            </View>
+          </View>
 
-            {/* Calendar Grid */}
-            <View style={styles.calendar}>
-              {/* Week day headers */}
-              <View style={styles.weekDays}>
-                {weekDays.map(day => (
-                  <Text key={day} style={styles.weekDayText}>{day}</Text>
-                ))}
-              </View>
+          <View style={styles.statsDivider} />
 
-              {/* Calendar days */}
-              <View style={styles.calendarGrid}>
-                {calendarDays.map((item, index) => (
-                  <View key={item.key} style={styles.calendarDay}>
-                    {!item.empty && (
-                      <View
-                        style={[
-                          styles.dayCircle,
-                          item.hasWorkout && styles.dayCircleActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.dayText,
-                            item.hasWorkout && styles.dayTextActive,
-                          ]}
-                        >
-                          {item.day}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                ))}
+          <View style={styles.statsRow}>
+            <View style={styles.statItemWide}>
+              <Text style={styles.statEmoji}>🏋️</Text>
+              <View>
+                <Text style={styles.statValueSmall}>{stats.totalVolume}k kg</Text>
+                <Text style={styles.statLabelSmall}>Total Volume</Text>
               </View>
             </View>
-
-            {/* Month Stats */}
-            <View style={styles.monthStats}>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{monthStats.workouts}</Text>
-                <Text style={styles.statLabel}>Workouts</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{monthStats.totalDuration}</Text>
-                <Text style={styles.statLabel}>Minutes</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{monthStats.totalXP}</Text>
-                <Text style={styles.statLabel}>XP Earned</Text>
+            <View style={styles.statItemWide}>
+              <Text style={styles.statEmoji}>⏱️</Text>
+              <View>
+                <Text style={styles.statValueSmall}>{formatDuration(stats.totalDuration)}</Text>
+                <Text style={styles.statLabelSmall}>Time Spent</Text>
               </View>
             </View>
+          </View>
+        </View>
 
-            {/* Month Workouts */}
-            <View style={styles.monthWorkouts}>
-              <Text style={styles.sectionTitle}>
-                Workouts in {getMonthName(selectedMonth, true)}
-              </Text>
-              {monthWorkouts.length > 0 ? (
-                monthWorkouts.map(workout => (
-                  <WorkoutHistoryItem
-                    key={workout.id}
-                    workout={workout}
-                    onPress={() => {}}
-                  />
-                ))
-              ) : (
-                <View style={styles.emptyMonth}>
-                  <Text style={styles.emptyText}>No workouts this month</Text>
-                </View>
-              )}
-            </View>
-          </>
-        ) : (
-          /* List View */
-          <View style={styles.listView}>
-            {workouts.length > 0 ? (
-              workouts.map(workout => (
-                <WorkoutHistoryItem
-                  key={workout.id}
-                  workout={workout}
-                  onPress={() => {}}
-                />
-              ))
-            ) : (
-              <View style={styles.emptyList}>
-                <Text style={styles.emptyEmoji}>🏋️</Text>
-                <Text style={styles.emptyTitle}>No workouts yet</Text>
-                <Text style={styles.emptyText}>
-                  Complete your first workout to see it here!
+        {/* Level Progress */}
+        <View style={styles.levelCard}>
+          <View style={styles.levelHeader}>
+            <Text style={styles.levelTitle}>Level {levelProgress.currentLevel}</Text>
+            <Text style={styles.xpText}>
+              {levelProgress.xpInCurrentLevel} / {levelProgress.xpNeededForLevel} XP
+            </Text>
+          </View>
+          <View style={styles.levelBarContainer}>
+            <View
+              style={[
+                styles.levelBarFill,
+                { width: `${levelProgress.progressPercent}%` },
+              ]}
+            />
+          </View>
+        </View>
+
+        {/* Workout History */}
+        {Object.keys(groupedWorkouts).length > 0 ? (
+          Object.entries(groupedWorkouts).map(([month, monthWorkouts]) => (
+            <View key={month} style={styles.monthSection}>
+              <View style={styles.monthHeader}>
+                <Text style={styles.monthTitle}>{month}</Text>
+                <Text style={styles.monthCount}>
+                  {monthWorkouts.length} workout{monthWorkouts.length !== 1 ? 's' : ''}
                 </Text>
               </View>
-            )}
+
+              {monthWorkouts.map((workout) => (
+                <WorkoutSummaryCard
+                  key={workout.id}
+                  workout={workout}
+                  onPress={() => navigation.navigate('WorkoutDetail', { workoutId: workout.id })}
+                />
+              ))}
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyEmoji}>💪</Text>
+            <Text style={styles.emptyTitle}>No workouts yet</Text>
+            <Text style={styles.emptyText}>
+              Complete your first workout to see your history here
+            </Text>
+            <TouchableOpacity
+              style={styles.startButton}
+              onPress={() => navigation.navigate('Home')}
+            >
+              <Text style={styles.startButtonText}>Start Workout</Text>
+            </TouchableOpacity>
           </View>
         )}
       </ScrollView>
@@ -280,180 +187,170 @@ const HistoryScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundSecondary,
+    backgroundColor: colors.background,
   },
-  loadingText: {
-    ...typography.styles.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginTop: spacing.xl,
-  },
-
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.gray200,
-  },
-  headerTitle: {
-    ...typography.styles.h4,
-    color: colors.text,
-  },
-  viewToggle: {
-    flexDirection: 'row',
-    backgroundColor: colors.gray100,
-    borderRadius: borderRadius.full,
-    padding: 2,
-  },
-  toggleButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-  },
-  toggleButtonActive: {
-    backgroundColor: colors.white,
-  },
-  toggleText: {
-    ...typography.styles.labelSmall,
-    color: colors.textSecondary,
-  },
-  toggleTextActive: {
-    color: colors.text,
-    fontWeight: '600',
-  },
-
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: spacing.md,
-    paddingBottom: spacing.xl,
+    padding: 16,
+    paddingBottom: 32,
   },
 
-  monthNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.md,
+  header: {
+    marginBottom: 20,
   },
-  monthNavButton: {
-    padding: spacing.sm,
-  },
-  monthNavButtonDisabled: {
-    opacity: 0.3,
-  },
-  monthNavText: {
-    fontSize: 24,
-    color: colors.primary,
-  },
-  monthTitle: {
-    ...typography.styles.h4,
+  title: {
+    fontSize: 32,
+    fontWeight: '800',
     color: colors.text,
   },
 
-  calendar: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    ...shadows.sm,
+  statsCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  weekDays: {
-    flexDirection: 'row',
-    marginBottom: spacing.sm,
+  statsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 16,
   },
-  weekDayText: {
-    ...typography.styles.labelSmall,
-    color: colors.textMuted,
-    flex: 1,
-    textAlign: 'center',
-  },
-  calendarGrid: {
+  statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
-  calendarDay: {
-    width: '14.28%',
-    aspectRatio: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 2,
-  },
-  dayCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dayCircleActive: {
-    backgroundColor: colors.primary,
-  },
-  dayText: {
-    ...typography.styles.body,
-    color: colors.text,
-  },
-  dayTextActive: {
-    color: colors.white,
-    fontWeight: '600',
-  },
-
-  monthStats: {
-    flexDirection: 'row',
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-    ...shadows.sm,
-  },
   statItem: {
-    flex: 1,
+    width: '50%',
     alignItems: 'center',
+    paddingVertical: 12,
   },
   statValue: {
-    ...typography.styles.h3,
-    color: colors.primary,
+    fontSize: 32,
+    fontWeight: '800',
+    color: colors.text,
   },
   statLabel: {
-    ...typography.styles.caption,
-    color: colors.textMuted,
-    marginTop: 2,
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 4,
   },
-
-  monthWorkouts: {},
-  sectionTitle: {
-    ...typography.styles.h5,
-    color: colors.text,
-    marginBottom: spacing.sm,
+  statsDivider: {
+    height: 1,
+    backgroundColor: colors.gray200,
+    marginVertical: 16,
   },
-  emptyMonth: {
-    backgroundColor: colors.white,
-    padding: spacing.lg,
-    borderRadius: borderRadius.lg,
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  statItemWide: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  emptyText: {
-    ...typography.styles.body,
+  statEmoji: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  statValueSmall: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  statLabelSmall: {
+    fontSize: 12,
     color: colors.textSecondary,
   },
 
-  listView: {},
-  emptyList: {
+  levelCard: {
+    backgroundColor: colors.primary + '15',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  levelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: spacing.xl * 2,
+    marginBottom: 8,
+  },
+  levelTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  xpText: {
+    fontSize: 14,
+    color: colors.text,
+  },
+  levelBarContainer: {
+    height: 8,
+    backgroundColor: colors.primary + '30',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  levelBarFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+    borderRadius: 4,
+  },
+
+  monthSection: {
+    marginBottom: 24,
+  },
+  monthHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  monthTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  monthCount: {
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 48,
   },
   emptyEmoji: {
-    fontSize: 48,
-    marginBottom: spacing.md,
+    fontSize: 64,
+    marginBottom: 16,
   },
   emptyTitle: {
-    ...typography.styles.h4,
+    fontSize: 20,
+    fontWeight: '700',
     color: colors.text,
-    marginBottom: spacing.xs,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  startButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  startButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.surface,
   },
 });
 

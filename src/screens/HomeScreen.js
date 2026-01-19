@@ -1,109 +1,50 @@
-// HomeScreen
-// Main dashboard with streak, muscle status, and workout suggestion
+// GainStreak Home Screen
+// Main dashboard with streak, recovery status, and workout suggestions
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   RefreshControl,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { colors } from '../theme/colors';
-import { typography } from '../theme/typography';
-import { spacing, borderRadius, shadows } from '../theme/spacing';
 
-// Components
-import { StreakDisplay } from '../components/StreakCounter';
-import MuscleBar, { MuscleBarCompact } from '../components/MuscleBar';
-import XPCounter from '../components/XPCounter';
-import { WorkoutPreview } from '../components/WorkoutSummary';
-import { ActionCard, StatCard } from '../components/Card';
+import { useAppStore } from '../hooks/useStore';
+import { colors } from '../utils/colors';
+import { isStreakAtRisk, getLevelProgress } from '../utils/calculations';
 
-// Engine & Storage
-import dataManager from '../storage/dataManager';
-import storage from '../storage/asyncStorage';
-import { generateWorkout, generateQuickWorkout } from '../engine/workoutGenerator';
-import { calculateAllMuscleRecovery, getMusclesByPriority } from '../engine/recoveryCalculator';
-import { calculateDifficultyLevel, getMotivationalMessage } from '../engine/adaptiveDifficulty';
-import { calculateConsistencyScore } from '../utils/calculations';
-import { formatMuscleName } from '../utils/formatters';
-import { MUSCLE_GROUPS } from '../data/muscles';
+import StreakDisplay from '../components/StreakDisplay';
+import MuscleHeatMap, { MuscleRecoveryList } from '../components/MuscleHeatMap';
+import WorkoutCard, { RestDayCard } from '../components/WorkoutCard';
 
 const HomeScreen = ({ navigation }) => {
-  const [user, setUser] = useState(null);
-  const [muscleStatus, setMuscleStatus] = useState(null);
-  const [workouts, setWorkouts] = useState([]);
-  const [settings, setSettings] = useState({});
-  const [suggestedWorkout, setSuggestedWorkout] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const {
+    isLoading,
+    userProfile,
+    streakData,
+    recoveryData,
+    suggestedWorkout,
+    workouts,
+    refreshRecovery,
+    initialize,
+  } = useAppStore();
 
-  // Load data on focus
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  // Refresh on focus
   useFocusEffect(
     useCallback(() => {
-      loadData();
+      refreshRecovery();
     }, [])
   );
 
-  const loadData = async () => {
-    try {
-      const appData = await dataManager.loadAppData();
-
-      if (!appData.isInitialized) {
-        // Initialize new user
-        const newUser = await dataManager.initializeNewUser('Athlete');
-        setUser(newUser);
-        setMuscleStatus(await storage.getMuscleStatus());
-        setWorkouts([]);
-        setSettings(await storage.getSettings());
-      } else {
-        setUser(appData.user);
-        setWorkouts(appData.workouts || []);
-        setSettings(appData.settings || {});
-
-        // Update muscle recovery
-        const updatedMuscles = await dataManager.updateMuscleRecovery();
-        setMuscleStatus(updatedMuscles);
-
-        // Check streak
-        await dataManager.checkAndUpdateStreak();
-      }
-
-      // Generate workout suggestion
-      generateSuggestion();
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const generateSuggestion = async () => {
-    const muscleData = await storage.getMuscleStatus();
-    const workoutHistory = await storage.getWorkouts();
-    const userSettings = await storage.getSettings();
-    const records = await storage.getPersonalRecords();
-
-    const consistency = calculateConsistencyScore(workoutHistory, 4, 14);
-
-    const workout = generateWorkout(
-      muscleData,
-      userSettings,
-      workoutHistory,
-      records,
-      consistency
-    );
-
-    setSuggestedWorkout(workout);
-  };
-
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadData();
+    await refreshRecovery();
     setRefreshing(false);
   };
 
@@ -113,25 +54,17 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  const handleQuickWorkout = async () => {
-    const muscleData = await storage.getMuscleStatus();
-    const userSettings = await storage.getSettings();
-    const quickWorkout = generateQuickWorkout(muscleData, userSettings);
-    navigation.navigate('Workout', { workout: quickWorkout });
-  };
+  // Calculate stats
+  const thisWeekWorkouts = workouts.filter(w => {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    return new Date(w.date || w.completedAt) >= weekAgo;
+  }).length;
 
-  const handleMusclePress = (muscleId) => {
-    navigation.navigate('MuscleDetail', { muscleId });
-  };
+  const levelProgress = getLevelProgress(userProfile?.totalXP || 0);
+  const streakAtRisk = isStreakAtRisk(streakData?.lastWorkoutDate);
 
-  // Get muscle recovery data
-  const muscleRecovery = muscleStatus ? calculateAllMuscleRecovery(muscleStatus) : {};
-  const priorityMuscles = muscleStatus ? getMusclesByPriority(muscleStatus) : [];
-
-  // Get motivational message
-  const motivation = getMotivationalMessage(workouts, user?.stats?.currentStreak || 0);
-
-  if (loading) {
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <Text style={styles.loadingText}>Loading...</Text>
@@ -140,231 +73,299 @@ const HomeScreen = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
         }
       >
         {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>
-              Hello, {user?.name || 'Athlete'}! 👋
+              Hey, {userProfile?.name || 'Athlete'}!
             </Text>
-            <Text style={styles.subtitle}>{motivation.message}</Text>
+            <Text style={styles.subtitle}>
+              {getMotivationalMessage(streakData?.currentStreak || 0, thisWeekWorkouts)}
+            </Text>
           </View>
-          <XPCounter totalXP={user?.stats?.totalXP || 0} showProgress={false} size="small" />
+          <TouchableOpacity
+            style={styles.levelBadge}
+            onPress={() => navigation.navigate('Profile')}
+          >
+            <Text style={styles.levelText}>Lvl {levelProgress.currentLevel}</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Streak Display */}
-        <View style={styles.streakContainer}>
-          <StreakDisplay
-            streak={user?.stats?.currentStreak || 0}
-            shields={user?.stats?.streakShields || 0}
-            longestStreak={user?.stats?.longestStreak || 0}
-          />
-        </View>
+        <StreakDisplay
+          currentStreak={streakData?.currentStreak || 0}
+          longestStreak={streakData?.longestStreak || 0}
+          streakFreezesRemaining={streakData?.streakFreezesRemaining || 0}
+          isAtRisk={streakAtRisk}
+          style={styles.streakCard}
+        />
 
         {/* Quick Stats */}
         <View style={styles.statsRow}>
           <StatCard
             label="This Week"
-            value={workouts.filter(w => {
-              const weekAgo = new Date();
-              weekAgo.setDate(weekAgo.getDate() - 7);
-              return new Date(w.date) >= weekAgo;
-            }).length}
-            icon={<Text style={styles.statIcon}>📅</Text>}
-            style={styles.statCard}
+            value={thisWeekWorkouts}
+            icon="📅"
           />
           <StatCard
-            label="Total Workouts"
-            value={user?.stats?.totalWorkouts || 0}
-            icon={<Text style={styles.statIcon}>💪</Text>}
-            style={styles.statCard}
+            label="Total"
+            value={workouts.length}
+            icon="💪"
           />
           <StatCard
-            label="Level"
-            value={user?.stats?.level || 1}
-            icon={<Text style={styles.statIcon}>⭐</Text>}
-            style={styles.statCard}
+            label="XP"
+            value={userProfile?.totalXP || 0}
+            icon="⭐"
           />
         </View>
 
-        {/* Muscle Status Preview */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Muscle Status</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('MuscleDetail')}>
-              <Text style={styles.seeAllText}>See All →</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.muscleGrid}>
-            {priorityMuscles.slice(0, 6).map(({ muscleId, recovery }) => (
-              <View key={muscleId} style={styles.muscleItem}>
-                <MuscleBarCompact
-                  muscleId={muscleId}
-                  recovery={recovery}
-                  onPress={handleMusclePress}
-                />
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Workout Suggestion */}
+        {/* Today's Workout */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Today's Workout</Text>
-
           {suggestedWorkout ? (
-            <WorkoutPreview
+            <WorkoutCard
               workout={suggestedWorkout}
               onStart={handleStartWorkout}
-              onModify={() => {}}
-              style={styles.workoutCard}
+              onCustomize={() => {}}
             />
           ) : (
-            <View style={styles.restDayCard}>
-              <Text style={styles.restDayEmoji}>😴</Text>
-              <Text style={styles.restDayTitle}>Rest Day Recommended</Text>
-              <Text style={styles.restDayText}>
-                Your muscles need recovery. Come back tomorrow!
-              </Text>
-            </View>
+            <RestDayCard />
           )}
         </View>
 
-        {/* Quick Workout Option */}
-        <ActionCard
-          title="Short on time?"
-          description="Try a quick 15-minute workout"
-          actionLabel="Quick Workout"
-          onAction={handleQuickWorkout}
-          variant="secondary"
-          style={styles.quickWorkoutCard}
-        />
+        {/* Muscle Recovery Status */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recovery Status</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Recovery')}>
+              <Text style={styles.seeAllText}>See All →</Text>
+            </TouchableOpacity>
+          </View>
+          {recoveryData && (
+            <MuscleHeatMap
+              recoveryData={recoveryData}
+              onMusclePress={(muscle) => {
+                navigation.navigate('Recovery', { selectedMuscle: muscle });
+              }}
+            />
+          )}
+        </View>
+
+        {/* Recent Activity */}
+        {workouts.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recent Activity</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('History')}>
+                <Text style={styles.seeAllText}>See All →</Text>
+              </TouchableOpacity>
+            </View>
+            {workouts.slice(0, 3).map((workout, index) => (
+              <RecentWorkoutItem key={workout.id || index} workout={workout} />
+            ))}
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 };
 
+// Stat card component
+const StatCard = ({ label, value, icon }) => (
+  <View style={styles.statCard}>
+    <Text style={styles.statIcon}>{icon}</Text>
+    <Text style={styles.statValue}>{value}</Text>
+    <Text style={styles.statLabel}>{label}</Text>
+  </View>
+);
+
+// Recent workout item
+const RecentWorkoutItem = ({ workout }) => {
+  const date = new Date(workout.date || workout.completedAt);
+  const formattedDate = date.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+
+  return (
+    <View style={styles.recentItem}>
+      <View style={styles.recentLeft}>
+        <Text style={styles.recentDate}>{formattedDate}</Text>
+        <Text style={styles.recentName}>{workout.name}</Text>
+      </View>
+      {workout.xpEarned && (
+        <View style={styles.recentXP}>
+          <Text style={styles.recentXPText}>+{workout.xpEarned} XP</Text>
+        </View>
+      )}
+    </View>
+  );
+};
+
+// Motivational message based on streak and activity
+const getMotivationalMessage = (streak, thisWeek) => {
+  if (streak >= 30) return "You're on fire! Keep that momentum going.";
+  if (streak >= 14) return "Two weeks strong! You're building a habit.";
+  if (streak >= 7) return "One week down! Consistency is key.";
+  if (streak >= 3) return "Great start! Keep showing up.";
+  if (thisWeek >= 3) return "Solid week so far!";
+  if (thisWeek >= 1) return "Good to see you back!";
+  return "Ready to get stronger?";
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundSecondary,
+    backgroundColor: colors.background,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.backgroundSecondary,
+    backgroundColor: colors.background,
   },
   loadingText: {
-    ...typography.styles.body,
+    fontSize: 16,
     color: colors.textSecondary,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: spacing.md,
-    paddingBottom: spacing.xl,
+    padding: 16,
+    paddingBottom: 32,
   },
 
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: spacing.md,
+    marginBottom: 20,
   },
   greeting: {
-    ...typography.styles.h3,
+    fontSize: 28,
+    fontWeight: '800',
     color: colors.text,
   },
   subtitle: {
-    ...typography.styles.body,
+    fontSize: 15,
     color: colors.textSecondary,
-    marginTop: spacing.xs,
+    marginTop: 4,
+  },
+  levelBadge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  levelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.surface,
   },
 
-  streakContainer: {
-    marginBottom: spacing.lg,
+  streakCard: {
+    marginBottom: 16,
   },
 
   statsRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
+    gap: 12,
+    marginBottom: 24,
   },
   statCard: {
     flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   statIcon: {
     fontSize: 20,
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
 
   section: {
-    marginBottom: spacing.lg,
+    marginBottom: 24,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: 12,
   },
   sectionTitle: {
-    ...typography.styles.h5,
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.text,
   },
   seeAllText: {
-    ...typography.styles.label,
+    fontSize: 14,
+    fontWeight: '600',
     color: colors.primary,
   },
 
-  muscleGrid: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    ...shadows.sm,
-  },
-  muscleItem: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.gray100,
-  },
-
-  workoutCard: {
-    marginTop: spacing.sm,
-  },
-
-  restDayCard: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.xl,
-    padding: spacing.xl,
+  recentItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    ...shadows.sm,
+    backgroundColor: colors.surface,
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 8,
   },
-  restDayEmoji: {
-    fontSize: 48,
-    marginBottom: spacing.sm,
+  recentLeft: {
+    flex: 1,
   },
-  restDayTitle: {
-    ...typography.styles.h4,
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  restDayText: {
-    ...typography.styles.body,
+  recentDate: {
+    fontSize: 12,
     color: colors.textSecondary,
-    textAlign: 'center',
   },
-
-  quickWorkoutCard: {
-    marginTop: spacing.md,
+  recentName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    marginTop: 2,
+  },
+  recentXP: {
+    backgroundColor: colors.primary + '15',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  recentXPText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
   },
 });
 

@@ -1,158 +1,123 @@
-// FitStreak Calculation Utilities
-// Formulas for 1RM, volume, and other fitness calculations
+// GainStreak Calculation Utilities
 
-// Estimated 1RM using Brzycki formula
-// Most accurate for reps under 10
-export const calculate1RM = (weight, reps) => {
-  if (reps <= 0 || weight <= 0) return 0;
-  if (reps === 1) return weight;
+import { differenceInDays, differenceInHours, startOfDay, isToday, isYesterday } from 'date-fns';
+import { BaseRecoveryDays } from '../types';
 
-  // Brzycki formula: 1RM = weight × (36 / (37 - reps))
-  const oneRM = weight * (36 / (37 - reps));
-  return Math.round(oneRM * 10) / 10; // Round to 1 decimal
+/**
+ * Calculate recovery score for a muscle group
+ * Uses exponential back-off based on muscle group, intensity, and user age
+ */
+export const calculateRecoveryScore = (
+  muscleGroup,
+  lastTrainedDate,
+  intensity,
+  userAge = 25
+) => {
+  if (!lastTrainedDate) return 100;
+
+  const now = new Date();
+  const trainedDate = new Date(lastTrainedDate);
+  const daysSinceTraining = differenceInHours(now, trainedDate) / 24;
+
+  // Base recovery time for muscle group
+  const baseRecoveryDays = BaseRecoveryDays[muscleGroup] || 2;
+
+  // Intensity multiplier (higher intensity = longer recovery)
+  const intensityMultiplier = 1 + (intensity / 100) * 0.5;
+
+  // Age multiplier (older = longer recovery)
+  let ageMultiplier = 1;
+  if (userAge > 40) ageMultiplier = 1.2;
+  else if (userAge > 30) ageMultiplier = 1.1;
+
+  // Calculate required recovery days
+  const requiredRecoveryDays = baseRecoveryDays * intensityMultiplier * ageMultiplier;
+
+  // Calculate recovery percentage (0-100)
+  const recoveryPercentage = Math.min(100, (daysSinceTraining / requiredRecoveryDays) * 100);
+
+  return Math.round(recoveryPercentage);
 };
 
-// Calculate weight for target reps based on 1RM
-export const calculateWeightForReps = (oneRM, targetReps) => {
-  if (targetReps <= 0 || oneRM <= 0) return 0;
-  if (targetReps === 1) return oneRM;
+/**
+ * Calculate workout intensity from exercise logs
+ * Based on volume comparison to user baseline
+ */
+export const calculateIntensity = (exerciseLogs, userBaseline = {}) => {
+  if (!exerciseLogs || exerciseLogs.length === 0) return 50;
 
-  // Inverse Brzycki: weight = 1RM × ((37 - reps) / 36)
-  const weight = oneRM * ((37 - targetReps) / 36);
-  return Math.round(weight / 2.5) * 2.5; // Round to nearest 2.5
-};
+  let totalVolumeScore = 0;
+  let exerciseCount = 0;
 
-// Calculate workout volume (sets × reps × weight)
-export const calculateVolume = (sets) => {
-  return sets.reduce((total, set) => {
-    if (set.completed) {
-      return total + (set.weight * set.reps);
+  for (const log of exerciseLogs) {
+    const baseline = userBaseline[log.exerciseId];
+
+    // Calculate volume (sets x reps x weight)
+    const totalVolume = log.sets.reduce((sum, set) => sum + (set.reps * set.weight), 0);
+    const totalSets = log.sets.length;
+
+    if (baseline && baseline.typicalVolume > 0) {
+      // Compare to user's typical volume
+      const volumeRatio = totalVolume / baseline.typicalVolume;
+      const setsRatio = totalSets / (baseline.typicalSets || totalSets);
+
+      // Factor in RPE if provided
+      const avgRPE = log.sets.reduce((sum, set) => sum + (set.rpe || 7), 0) / log.sets.length;
+      const rpeMultiplier = avgRPE / 7;
+
+      totalVolumeScore += volumeRatio * setsRatio * rpeMultiplier;
+    } else {
+      // No baseline, assume moderate intensity
+      totalVolumeScore += 1;
     }
-    return total;
-  }, 0);
-};
-
-// Calculate total reps from sets
-export const calculateTotalReps = (sets) => {
-  return sets.reduce((total, set) => {
-    return total + (set.completed ? set.reps : 0);
-  }, 0);
-};
-
-// Calculate total sets completed
-export const calculateCompletedSets = (sets) => {
-  return sets.filter(set => set.completed).length;
-};
-
-// Calculate workout intensity (average percentage of 1RM)
-export const calculateIntensity = (exerciseSets, oneRM) => {
-  if (!oneRM || oneRM <= 0) return 0;
-
-  const completedSets = exerciseSets.filter(s => s.completed);
-  if (completedSets.length === 0) return 0;
-
-  const avgWeight = completedSets.reduce((sum, s) => sum + s.weight, 0) / completedSets.length;
-  return Math.round((avgWeight / oneRM) * 100);
-};
-
-// Determine intensity level from percentage
-export const getIntensityLevel = (intensityPercent) => {
-  if (intensityPercent < 60) return 'light';
-  if (intensityPercent < 75) return 'moderate';
-  if (intensityPercent < 85) return 'heavy';
-  return 'extreme';
-};
-
-// Calculate progressive overload suggestion
-export const suggestProgression = (lastWorkout, targetReps = 8) => {
-  if (!lastWorkout || !lastWorkout.sets || lastWorkout.sets.length === 0) {
-    return { type: 'start', message: 'Start with a comfortable weight' };
+    exerciseCount++;
   }
 
-  const completedSets = lastWorkout.sets.filter(s => s.completed);
-  if (completedSets.length === 0) {
-    return { type: 'same', message: 'Try the same weight again' };
-  }
-
-  const lastWeight = completedSets[completedSets.length - 1].weight;
-  const lastReps = completedSets[completedSets.length - 1].reps;
-  const allSetsHitTarget = completedSets.every(s => s.reps >= targetReps);
-
-  if (allSetsHitTarget) {
-    // Successful - suggest increase
-    const increase = lastWeight < 50 ? 2.5 : 5;
-    return {
-      type: 'increase',
-      weight: lastWeight + increase,
-      message: `Great job! Try ${lastWeight + increase} lbs this time`,
-    };
-  } else if (lastReps < targetReps - 2) {
-    // Struggled significantly - suggest decrease
-    const decrease = lastWeight < 50 ? 2.5 : 5;
-    return {
-      type: 'decrease',
-      weight: Math.max(0, lastWeight - decrease),
-      message: `Let's build up. Try ${lastWeight - decrease} lbs`,
-    };
-  } else {
-    // Close - stay the same
-    return {
-      type: 'same',
-      weight: lastWeight,
-      message: `Stay at ${lastWeight} lbs until you hit all reps`,
-    };
-  }
+  // Normalize to 0-100 scale
+  const avgScore = exerciseCount > 0 ? totalVolumeScore / exerciseCount : 0.5;
+  return Math.min(100, Math.max(0, avgScore * 50));
 };
 
-// Calculate consistency score (0-100)
-export const calculateConsistencyScore = (workouts, targetDays = 4, periodDays = 14) => {
-  const expectedWorkouts = Math.round((periodDays / 7) * targetDays);
-  const actualWorkouts = workouts.length;
-  return Math.min(100, Math.round((actualWorkouts / expectedWorkouts) * 100));
-};
+/**
+ * Calculate current streak from workout history
+ */
+export const calculateStreak = (workoutLogs) => {
+  if (!workoutLogs || workoutLogs.length === 0) return 0;
 
-// Calculate streak from workout dates
-export const calculateStreak = (workouts, currentDate = new Date()) => {
-  if (!workouts || workouts.length === 0) return 0;
-
-  // Sort workouts by date descending
-  const sorted = [...workouts].sort((a, b) =>
-    new Date(b.date) - new Date(a.date)
+  // Sort by date descending
+  const sortedLogs = [...workoutLogs].sort(
+    (a, b) => new Date(b.date) - new Date(a.date)
   );
 
+  const today = startOfDay(new Date());
+  let streak = 0;
+  let currentDate = today;
+
+  // Check if there's a workout today or yesterday to start the streak
+  const mostRecentWorkout = new Date(sortedLogs[0].date);
+  if (!isToday(mostRecentWorkout) && !isYesterday(mostRecentWorkout)) {
+    return 0;
+  }
+
   // Get unique workout dates
-  const workoutDates = [...new Set(sorted.map(w => {
-    const date = new Date(w.date);
-    return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-  }))];
-
-  if (workoutDates.length === 0) return 0;
-
-  // Check if most recent workout was today or yesterday
-  const today = `${currentDate.getFullYear()}-${currentDate.getMonth()}-${currentDate.getDate()}`;
-  const yesterday = new Date(currentDate);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = `${yesterday.getFullYear()}-${yesterday.getMonth()}-${yesterday.getDate()}`;
-
-  if (workoutDates[0] !== today && workoutDates[0] !== yesterdayStr) {
-    return 0; // Streak broken
-  }
-
-  let streak = 1;
-  let checkDate = new Date(currentDate);
-
-  // If today has no workout, start from yesterday
-  if (workoutDates[0] !== today) {
-    checkDate.setDate(checkDate.getDate() - 1);
-  }
+  const workoutDates = new Set(
+    sortedLogs.map(log => startOfDay(new Date(log.date)).toISOString())
+  );
 
   // Count consecutive days
-  for (let i = 1; i < 366; i++) { // Max 1 year
-    checkDate.setDate(checkDate.getDate() - 1);
-    const dateStr = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
-
-    if (workoutDates.includes(dateStr)) {
+  while (true) {
+    const dateStr = currentDate.toISOString();
+    if (workoutDates.has(dateStr)) {
       streak++;
+      currentDate = new Date(currentDate);
+      currentDate.setDate(currentDate.getDate() - 1);
+    } else if (streak === 0) {
+      // Check yesterday if no workout today
+      currentDate = new Date(currentDate);
+      currentDate.setDate(currentDate.getDate() - 1);
+      if (!workoutDates.has(currentDate.toISOString())) {
+        break;
+      }
     } else {
       break;
     }
@@ -161,76 +126,128 @@ export const calculateStreak = (workouts, currentDate = new Date()) => {
   return streak;
 };
 
-// Calculate XP for level
-export const xpForLevel = (level) => {
-  if (level <= 1) return 0;
-  // Exponential growth: each level needs more XP
-  // Level 2: 500, Level 3: 1200, Level 4: 2100, Level 5: 3300...
-  return Math.floor(200 * level * (level + 0.5));
+/**
+ * Check if streak is at risk (no workout today and had one yesterday)
+ */
+export const isStreakAtRisk = (lastWorkoutDate) => {
+  if (!lastWorkoutDate) return false;
+  const lastWorkout = new Date(lastWorkoutDate);
+  return isYesterday(lastWorkout) && !isToday(lastWorkout);
 };
 
-// Calculate level from XP
-export const levelFromXP = (totalXP) => {
-  let level = 1;
-  while (xpForLevel(level + 1) <= totalXP) {
-    level++;
+/**
+ * Calculate XP earned from a workout
+ */
+export const calculateWorkoutXP = (workout, streakDays = 0, bonuses = {}) => {
+  let totalXP = 0;
+  const breakdown = [];
+
+  // Base XP for completing workout
+  const baseXP = 100;
+  totalXP += baseXP;
+  breakdown.push({ label: 'Workout Complete', xp: baseXP });
+
+  // XP per exercise
+  const exerciseCount = workout.exercises?.length || 0;
+  const exerciseXP = exerciseCount * 15;
+  totalXP += exerciseXP;
+  breakdown.push({ label: `${exerciseCount} Exercises`, xp: exerciseXP });
+
+  // XP per set completed
+  const totalSets = workout.exercises?.reduce(
+    (sum, ex) => sum + (ex.sets?.filter(s => s.completed)?.length || 0),
+    0
+  ) || 0;
+  const setXP = totalSets * 5;
+  totalXP += setXP;
+  breakdown.push({ label: `${totalSets} Sets`, xp: setXP });
+
+  // Streak bonus (capped at 50)
+  const streakBonus = Math.min(streakDays * 5, 50);
+  if (streakBonus > 0) {
+    totalXP += streakBonus;
+    breakdown.push({ label: `${streakDays} Day Streak`, xp: streakBonus });
   }
-  return level;
+
+  // Personal records bonus
+  if (bonuses.newPRs && bonuses.newPRs > 0) {
+    const prXP = bonuses.newPRs * 25;
+    totalXP += prXP;
+    breakdown.push({ label: `${bonuses.newPRs} New PR${bonuses.newPRs > 1 ? 's' : ''}`, xp: prXP });
+  }
+
+  return { total: totalXP, breakdown };
 };
 
-// Calculate XP progress to next level
-export const xpProgressToNextLevel = (totalXP) => {
-  const currentLevel = levelFromXP(totalXP);
-  const currentLevelXP = xpForLevel(currentLevel);
-  const nextLevelXP = xpForLevel(currentLevel + 1);
+/**
+ * Calculate level from total XP
+ */
+export const calculateLevel = (totalXP) => {
+  // Each level requires progressively more XP
+  // Level 1: 0 XP, Level 2: 500 XP, Level 3: 1200 XP, etc.
+  let level = 1;
+  let xpRequired = 0;
 
-  const xpIntoLevel = totalXP - currentLevelXP;
-  const xpNeeded = nextLevelXP - currentLevelXP;
+  while (totalXP >= xpRequired) {
+    level++;
+    xpRequired += level * 250;
+  }
+
+  return level - 1;
+};
+
+/**
+ * Get XP required for next level
+ */
+export const getXPForNextLevel = (currentLevel) => {
+  let totalXP = 0;
+  for (let i = 2; i <= currentLevel + 1; i++) {
+    totalXP += i * 250;
+  }
+  return totalXP;
+};
+
+/**
+ * Get XP progress towards next level
+ */
+export const getLevelProgress = (totalXP) => {
+  const currentLevel = calculateLevel(totalXP);
+  const currentLevelXP = getXPForNextLevel(currentLevel - 1) || 0;
+  const nextLevelXP = getXPForNextLevel(currentLevel);
+  const xpInCurrentLevel = totalXP - currentLevelXP;
+  const xpNeededForLevel = nextLevelXP - currentLevelXP;
 
   return {
-    currentXP: xpIntoLevel,
-    neededXP: xpNeeded,
-    progress: Math.round((xpIntoLevel / xpNeeded) * 100),
+    currentLevel,
+    xpInCurrentLevel,
+    xpNeededForLevel,
+    progressPercent: (xpInCurrentLevel / xpNeededForLevel) * 100,
   };
 };
 
-// Round weight to standard increment
-export const roundToIncrement = (weight, increment = 2.5) => {
-  return Math.round(weight / increment) * increment;
+/**
+ * Format duration in minutes to readable string
+ */
+export const formatDuration = (minutes) => {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 };
 
-// Calculate BMI (for optional tracking)
-export const calculateBMI = (weightKg, heightCm) => {
-  const heightM = heightCm / 100;
-  return Math.round((weightKg / (heightM * heightM)) * 10) / 10;
+/**
+ * Format weight with unit
+ */
+export const formatWeight = (weight, unit = 'kg') => {
+  return `${weight} ${unit}`;
 };
 
-// Calculate calories burned estimate (very rough)
-export const estimateCaloriesBurned = (durationMinutes, intensity = 'moderate') => {
-  const caloriesPerMinute = {
-    light: 4,
-    moderate: 6,
-    heavy: 8,
-    extreme: 10,
-  };
-  return Math.round(durationMinutes * (caloriesPerMinute[intensity] || 6));
-};
-
-export default {
-  calculate1RM,
-  calculateWeightForReps,
-  calculateVolume,
-  calculateTotalReps,
-  calculateCompletedSets,
-  calculateIntensity,
-  getIntensityLevel,
-  suggestProgression,
-  calculateConsistencyScore,
-  calculateStreak,
-  xpForLevel,
-  levelFromXP,
-  xpProgressToNextLevel,
-  roundToIncrement,
-  calculateBMI,
-  estimateCaloriesBurned,
+/**
+ * Convert weight between units
+ */
+export const convertWeight = (weight, fromUnit, toUnit) => {
+  if (fromUnit === toUnit) return weight;
+  if (fromUnit === 'kg' && toUnit === 'lbs') return Math.round(weight * 2.205);
+  if (fromUnit === 'lbs' && toUnit === 'kg') return Math.round(weight / 2.205);
+  return weight;
 };

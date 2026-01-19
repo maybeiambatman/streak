@@ -1,7 +1,7 @@
-// WorkoutScreen
-// Active workout with exercise logging
+// GainStreak Workout Screen
+// Active workout session with exercise logging
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,204 +9,162 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
-import { typography } from '../theme/typography';
-import { spacing, borderRadius, shadows } from '../theme/spacing';
 
-// Components
-import ExerciseCard from '../components/ExerciseCard';
-import RestTimer from '../components/RestTimer';
-import Button from '../components/Button';
-import { WorkoutComplete } from '../components/WorkoutSummary';
+import { useAppStore, useWorkoutStore } from '../hooks/useStore';
+import { colors } from '../utils/colors';
+import { formatDuration } from '../utils/calculations';
 
-// Engine & Storage
-import dataManager from '../storage/dataManager';
-import { calculateWorkoutXP } from '../engine/xpCalculator';
-import { formatDuration } from '../utils/formatters';
+import { ExerciseCard } from '../components/ExerciseList';
+import SetLogger from '../components/SetLogger';
+import CelebrationModal from '../components/CelebrationModal';
 
 const WorkoutScreen = ({ route, navigation }) => {
-  const { workout: initialWorkout } = route.params;
+  const { workout: initialWorkout } = route.params || {};
 
-  const [workout, setWorkout] = useState(() => ({
-    ...initialWorkout,
-    exercises: initialWorkout.exercises.map(ex => ({
-      ...ex,
-      sets: Array(ex.suggestedSets || 3).fill(null).map(() => ({
-        weight: ex.suggestedWeight || 0,
-        reps: parseInt(ex.suggestedReps) || 10,
-        completed: false,
-      })),
-    })),
-  }));
+  const { completeWorkout: saveWorkout, settings } = useAppStore();
+  const {
+    isActive,
+    workout,
+    exerciseLogs,
+    currentExerciseIndex,
+    startWorkout,
+    updateSet,
+    completeSet,
+    addSet,
+    setCurrentExercise,
+    finishWorkout,
+    cancelWorkout,
+    getWorkoutSummary,
+  } = useWorkoutStore();
 
-  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
-  const [isResting, setIsResting] = useState(false);
-  const [showComplete, setShowComplete] = useState(false);
-  const [completionData, setCompletionData] = useState(null);
-  const [startTime] = useState(new Date());
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [completionData, setCompletionData] = useState(null);
+  const [expandedExercise, setExpandedExercise] = useState(null);
 
-  const scrollViewRef = useRef(null);
-
-  // Update elapsed time
+  // Initialize workout
   useEffect(() => {
+    if (initialWorkout && !isActive) {
+      startWorkout(initialWorkout);
+    }
+  }, [initialWorkout]);
+
+  // Timer
+  useEffect(() => {
+    if (!isActive) return;
+
     const interval = setInterval(() => {
-      setElapsedTime(Math.floor((new Date() - startTime) / 1000 / 60));
-    }, 1000);
+      setElapsedTime(prev => prev + 1);
+    }, 60000); // Update every minute
 
     return () => clearInterval(interval);
-  }, [startTime]);
+  }, [isActive]);
 
   // Handle set completion
-  const handleSetComplete = (exerciseIndex, setIndex, setData) => {
-    setWorkout(prev => {
-      const newExercises = [...prev.exercises];
-      const exercise = { ...newExercises[exerciseIndex] };
-      exercise.sets = [...exercise.sets];
-      exercise.sets[setIndex] = {
-        ...exercise.sets[setIndex],
-        ...setData,
-        completed: true,
-      };
-      newExercises[exerciseIndex] = exercise;
-
-      return { ...prev, exercises: newExercises };
-    });
-
-    // Show rest timer if not the last set
-    const exercise = workout.exercises[exerciseIndex];
-    const isLastSet = setIndex === exercise.sets.length - 1;
-
-    if (!isLastSet) {
-      setIsResting(true);
-    }
+  const handleCompleteSet = (exerciseIndex, setIndex) => {
+    completeSet(exerciseIndex, setIndex);
   };
 
-  // Handle set update (before completion)
-  const handleSetUpdate = (exerciseIndex, setIndex, setData) => {
-    setWorkout(prev => {
-      const newExercises = [...prev.exercises];
-      const exercise = { ...newExercises[exerciseIndex] };
-      exercise.sets = [...exercise.sets];
-      exercise.sets[setIndex] = {
-        ...exercise.sets[setIndex],
-        ...setData,
-      };
-      newExercises[exerciseIndex] = exercise;
-
-      return { ...prev, exercises: newExercises };
-    });
-  };
-
-  // Navigate to next exercise
-  const handleNextExercise = () => {
-    if (currentExerciseIndex < workout.exercises.length - 1) {
-      const nextIndex = currentExerciseIndex + 1;
-      setCurrentExerciseIndex(nextIndex);
-
-      // Scroll to the exercise
-      // In a real app, you'd scroll to the specific exercise
-    }
-  };
-
-  // Navigate to previous exercise
-  const handlePreviousExercise = () => {
-    if (currentExerciseIndex > 0) {
-      setCurrentExerciseIndex(currentExerciseIndex - 1);
-    }
+  // Handle set update
+  const handleUpdateSet = (exerciseIndex, setIndex, data) => {
+    updateSet(exerciseIndex, setIndex, data);
   };
 
   // Complete workout
   const handleCompleteWorkout = async () => {
-    const duration = Math.floor((new Date() - startTime) / 1000 / 60);
+    const completedWorkout = finishWorkout();
 
     try {
-      const result = await dataManager.completeWorkout({
-        ...workout,
-        duration,
-        intensity: 'moderate',
-      });
-
-      // Calculate XP earned
-      const xpResult = calculateWorkoutXP(workout, result.user.stats.currentStreak, {
-        newPRs: result.newPRs.length,
-      });
+      const result = await saveWorkout(completedWorkout);
 
       setCompletionData({
-        workout: result.workout,
-        stats: {
-          duration,
-          exercises: workout.exercises.length,
-          sets: workout.exercises.reduce(
-            (sum, ex) => sum + ex.sets.filter(s => s.completed).length,
+        workoutStats: {
+          duration: completedWorkout.duration,
+          exercises: completedWorkout.exercises.length,
+          completedSets: completedWorkout.exercises.reduce(
+            (sum, ex) => sum + ex.sets.length,
             0
           ),
+          totalVolume: completedWorkout.totalVolume,
         },
-        xpEarned: result.xpEarned,
-        xpBreakdown: xpResult.breakdown,
-        newPRs: result.newPRs,
+        xpEarned: result.xpEarned || 150,
+        xpBreakdown: [
+          { label: 'Workout Complete', xp: 100 },
+          { label: 'Exercises', xp: completedWorkout.exercises.length * 15 },
+          { label: 'Streak Bonus', xp: Math.min(result.streakData?.currentStreak * 5 || 0, 50) },
+        ],
+        newPRs: result.newPRs || [],
         streakInfo: {
-          currentStreak: result.user.stats.currentStreak,
-          isNewRecord: result.user.stats.currentStreak >= result.user.stats.longestStreak,
+          currentStreak: result.streakData?.currentStreak || 0,
+          isNewRecord: result.streakData?.currentStreak >= result.streakData?.longestStreak,
         },
-        levelUp: result.levelUp,
-        newLevel: result.newLevel,
       });
 
-      setShowComplete(true);
+      setShowCelebration(true);
     } catch (error) {
       console.error('Error completing workout:', error);
       Alert.alert('Error', 'Failed to save workout. Please try again.');
     }
   };
 
-  // Confirm exit
+  // Handle exit
   const handleExit = () => {
     Alert.alert(
       'End Workout?',
       'Your progress will be lost if you exit now.',
       [
-        { text: 'Continue Workout', style: 'cancel' },
-        {
-          text: 'End Without Saving',
-          style: 'destructive',
-          onPress: () => navigation.goBack(),
-        },
+        { text: 'Continue', style: 'cancel' },
         {
           text: 'Save & Exit',
           onPress: handleCompleteWorkout,
+        },
+        {
+          text: 'Exit Without Saving',
+          style: 'destructive',
+          onPress: () => {
+            cancelWorkout();
+            navigation.goBack();
+          },
         },
       ]
     );
   };
 
-  // Check if all exercises have at least one completed set
-  const canComplete = workout.exercises.every(
-    ex => ex.sets.some(s => s.completed)
-  );
+  // Handle celebration close
+  const handleCelebrationClose = () => {
+    setShowCelebration(false);
+    navigation.goBack();
+  };
+
+  if (!isActive || !workout) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text style={styles.errorText}>No workout loaded</Text>
+      </SafeAreaView>
+    );
+  }
 
   // Calculate progress
-  const totalSets = workout.exercises.reduce(
-    (sum, ex) => sum + (ex.suggestedSets || ex.sets.length),
+  const totalSets = exerciseLogs.reduce(
+    (sum, ex) => sum + ex.sets.length,
     0
   );
-  const completedSets = workout.exercises.reduce(
+  const completedSets = exerciseLogs.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed).length,
     0
   );
-  const progressPercent = (completedSets / totalSets) * 100;
+  const progressPercent = totalSets > 0 ? (completedSets / totalSets) * 100 : 0;
+  const canComplete = exerciseLogs.every(ex => ex.sets.some(s => s.completed));
 
-  const currentExercise = workout.exercises[currentExerciseIndex];
-  const nextExercise = workout.exercises[currentExerciseIndex + 1];
+  const weightUnit = settings?.weightUnit || 'kg';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={handleExit} style={styles.exitButton}>
+        <TouchableOpacity style={styles.exitButton} onPress={handleExit}>
           <Text style={styles.exitButtonText}>✕</Text>
         </TouchableOpacity>
 
@@ -216,9 +174,7 @@ const WorkoutScreen = ({ route, navigation }) => {
         </View>
 
         <View style={styles.headerRight}>
-          <Text style={styles.progressText}>
-            {completedSets}/{totalSets} sets
-          </Text>
+          <Text style={styles.progressText}>{completedSets}/{totalSets}</Text>
         </View>
       </View>
 
@@ -229,94 +185,97 @@ const WorkoutScreen = ({ route, navigation }) => {
 
       {/* Exercise list */}
       <ScrollView
-        ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {workout.exercises.map((exercise, index) => (
-          <ExerciseCard
-            key={exercise.exerciseId}
-            exercise={exercise}
-            exerciseIndex={index}
-            isActive={index === currentExerciseIndex}
-            onSetComplete={(setIndex, data) => handleSetComplete(index, setIndex, data)}
-            onUpdateSet={(setIndex, data) => handleSetUpdate(index, setIndex, data)}
-            onPress={() => setCurrentExerciseIndex(index)}
-          />
-        ))}
+        {exerciseLogs.map((exercise, exerciseIndex) => {
+          const isCurrentExercise = exerciseIndex === currentExerciseIndex;
+          const isExpanded = expandedExercise === exerciseIndex;
+          const allSetsCompleted = exercise.sets.every(s => s.completed);
 
-        {/* Complete button */}
+          return (
+            <ExerciseCard
+              key={exercise.exerciseId || exerciseIndex}
+              exercise={exercise}
+              isActive={isCurrentExercise}
+              isExpanded={isExpanded}
+              onPress={() => setCurrentExercise(exerciseIndex)}
+              onExpand={() => setExpandedExercise(isExpanded ? null : exerciseIndex)}
+            >
+              {/* Set loggers */}
+              {exercise.sets.map((set, setIndex) => (
+                <SetLogger
+                  key={setIndex}
+                  setNumber={setIndex + 1}
+                  weight={set.weight}
+                  reps={set.reps}
+                  isCompleted={set.completed}
+                  weightUnit={weightUnit}
+                  onUpdate={(data) => handleUpdateSet(exerciseIndex, setIndex, data)}
+                  onComplete={() => handleCompleteSet(exerciseIndex, setIndex)}
+                />
+              ))}
+
+              {/* Add set button */}
+              {!allSetsCompleted && (
+                <TouchableOpacity
+                  style={styles.addSetButton}
+                  onPress={() => addSet(exerciseIndex)}
+                >
+                  <Text style={styles.addSetText}>+ Add Set</Text>
+                </TouchableOpacity>
+              )}
+            </ExerciseCard>
+          );
+        })}
+
+        {/* Complete workout button */}
         {canComplete && (
-          <Button
-            title="Complete Workout"
-            onPress={handleCompleteWorkout}
-            variant="primary"
-            size="large"
-            fullWidth
+          <TouchableOpacity
             style={styles.completeButton}
-          />
+            onPress={handleCompleteWorkout}
+          >
+            <Text style={styles.completeButtonText}>Complete Workout</Text>
+          </TouchableOpacity>
         )}
+
+        <View style={styles.bottomSpacer} />
       </ScrollView>
 
       {/* Exercise navigation */}
       <View style={styles.navigationBar}>
         <TouchableOpacity
           style={[styles.navButton, currentExerciseIndex === 0 && styles.navButtonDisabled]}
-          onPress={handlePreviousExercise}
+          onPress={() => setCurrentExercise(Math.max(0, currentExerciseIndex - 1))}
           disabled={currentExerciseIndex === 0}
         >
-          <Text style={styles.navButtonText}>← Previous</Text>
+          <Text style={[styles.navButtonText, currentExerciseIndex === 0 && styles.navButtonTextDisabled]}>
+            ← Previous
+          </Text>
         </TouchableOpacity>
 
         <Text style={styles.navIndicator}>
-          {currentExerciseIndex + 1} / {workout.exercises.length}
+          {currentExerciseIndex + 1} / {exerciseLogs.length}
         </Text>
 
         <TouchableOpacity
-          style={[
-            styles.navButton,
-            currentExerciseIndex === workout.exercises.length - 1 && styles.navButtonDisabled,
-          ]}
-          onPress={handleNextExercise}
-          disabled={currentExerciseIndex === workout.exercises.length - 1}
+          style={[styles.navButton, currentExerciseIndex === exerciseLogs.length - 1 && styles.navButtonDisabled]}
+          onPress={() => setCurrentExercise(Math.min(exerciseLogs.length - 1, currentExerciseIndex + 1))}
+          disabled={currentExerciseIndex === exerciseLogs.length - 1}
         >
-          <Text style={styles.navButtonText}>Next →</Text>
+          <Text style={[styles.navButtonText, currentExerciseIndex === exerciseLogs.length - 1 && styles.navButtonTextDisabled]}>
+            Next →
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Rest timer */}
-      <RestTimer
-        visible={isResting}
-        duration={currentExercise?.restTime || 90}
-        nextExercise={nextExercise}
-        onComplete={() => setIsResting(false)}
-        onSkip={() => setIsResting(false)}
+      {/* Celebration modal */}
+      <CelebrationModal
+        visible={showCelebration}
+        onClose={handleCelebrationClose}
+        {...completionData}
       />
-
-      {/* Completion modal */}
-      <Modal
-        visible={showComplete}
-        animationType="slide"
-        presentationStyle="fullScreen"
-      >
-        <SafeAreaView style={styles.completeModal}>
-          {completionData && (
-            <WorkoutComplete
-              workout={completionData.workout}
-              stats={completionData.stats}
-              xpEarned={completionData.xpEarned}
-              xpBreakdown={completionData.xpBreakdown}
-              newPRs={completionData.newPRs}
-              streakInfo={completionData.streakInfo}
-              onDone={() => {
-                setShowComplete(false);
-                navigation.goBack();
-              }}
-            />
-          )}
-        </SafeAreaView>
-      </Modal>
     </SafeAreaView>
   );
 };
@@ -324,16 +283,22 @@ const WorkoutScreen = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundSecondary,
+    backgroundColor: colors.background,
+  },
+  errorText: {
+    fontSize: 16,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 40,
   },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.white,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.surface,
   },
   exitButton: {
     width: 40,
@@ -351,16 +316,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   workoutTitle: {
-    ...typography.styles.h5,
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.text,
   },
   workoutTime: {
-    ...typography.styles.caption,
+    fontSize: 14,
     color: colors.textSecondary,
   },
   headerRight: {},
   progressText: {
-    ...typography.styles.label,
+    fontSize: 16,
+    fontWeight: '700',
     color: colors.primary,
   },
 
@@ -377,45 +344,68 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: spacing.md,
-    paddingBottom: spacing.xl,
+    padding: 16,
+  },
+
+  addSetButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.gray200,
+    marginTop: 8,
+  },
+  addSetText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.primary,
   },
 
   completeButton: {
-    marginTop: spacing.lg,
+    backgroundColor: colors.success,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  completeButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.surface,
+  },
+
+  bottomSpacer: {
+    height: 100,
   },
 
   navigationBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.white,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.gray200,
   },
   navButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   navButtonDisabled: {
-    opacity: 0.3,
+    opacity: 0.4,
   },
   navButtonText: {
-    ...typography.styles.button,
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.primary,
   },
-  navIndicator: {
-    ...typography.styles.label,
+  navButtonTextDisabled: {
     color: colors.textSecondary,
   },
-
-  completeModal: {
-    flex: 1,
-    backgroundColor: colors.backgroundSecondary,
-    justifyContent: 'center',
-    padding: spacing.md,
+  navIndicator: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: colors.textSecondary,
   },
 });
 
