@@ -61,12 +61,10 @@ export const calculateAllMuscleRecovery = (muscleRecoveryState, userAge = 25) =>
 /**
  * Get recovery status label
  */
-const getRecoveryStatus = (recoveryScore) => {
-  if (recoveryScore >= 90) return 'fully_recovered';
-  if (recoveryScore >= 70) return 'mostly_recovered';
-  if (recoveryScore >= 50) return 'partially_recovered';
-  if (recoveryScore >= 30) return 'recovering';
-  return 'needs_rest';
+export const getRecoveryStatus = (recoveryScore) => {
+  if (recoveryScore >= 80) return 'recovered';
+  if (recoveryScore >= 40) return 'recovering';
+  return 'fatigued';
 };
 
 /**
@@ -184,10 +182,9 @@ export const getRecommendedIntensity = (recoveryScore) => {
  */
 export const formatRecoveryTime = (hours) => {
   if (hours <= 0) return 'Ready';
-  if (hours < 1) return 'Less than 1 hour';
-  if (hours < 24) return `${Math.round(hours)} hours`;
+  if (hours < 24) return `${Math.round(hours)}h`;
   const days = Math.round(hours / 24 * 10) / 10;
-  return `${days} day${days !== 1 ? 's' : ''}`;
+  return `${days}d`;
 };
 
 /**
@@ -211,6 +208,7 @@ export const getMuscleDisplayName = (muscle) => {
 
 export default {
   calculateAllMuscleRecovery,
+  getRecoveryStatus,
   getMusclesByRecoveryPriority,
   getTrainableMuscles,
   getMusclesNeedingRest,
